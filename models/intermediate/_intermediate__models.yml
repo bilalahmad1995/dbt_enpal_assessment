@@ -1,0 +1,118 @@
+version: 2
+
+models:
+  - name: int_deal_changes_resolved
+    description: >
+      Deal change log with reused deal ids split into individual deals (deal_key). Same grain as
+      stg_pipedrive__deal_changes: one row per deal field change. Base for all deal-level models.
+    columns:
+      - name: deal_change_id
+        description: Primary key, inherited from staging. Unique here proves the lifecycle join does not fan out.
+        data_tests:
+          - unique
+          - not_null
+      - name: deal_key
+        description: '{{ doc("deal_key") }}'
+        data_tests:
+          - not_null
+      - name: deal_id
+        description: '{{ doc("deal_id") }}'
+        data_tests:
+          - not_null
+      - name: deal_lifecycle_number
+        description: >
+          {{ doc("deal_lifecycle_number") }}
+          Null would mean the row could not be assigned to a deal creation (missing add_time, or a
+          reused id whose rows break the time-of-day rule), so the test is an error on purpose.
+        data_tests:
+          - not_null
+      - name: is_deal_id_reused
+        description: True for the rows of deal ids shared by more than one deal.
+      - name: field_key
+        description: Changed field (add_time, user_id, stage_id, lost_reason).
+      - name: new_value
+        description: New value as text; typed downstream per field_key.
+      - name: changed_at
+        description: Timestamp of the change.
+
+  - name: int_deal_stage_changes
+    description: One row per stage change of a deal, sequenced within the deal's timeline.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['deal_key', 'stage_sequence_number']
+    columns:
+      - name: deal_stage_change_id
+        description: Primary key; the deal_change_id of the stage change.
+        data_tests:
+          - unique
+          - not_null
+      - name: deal_key
+        description: '{{ doc("deal_key") }}'
+        data_tests:
+          - not_null
+      - name: deal_id
+        description: '{{ doc("deal_id") }}'
+      - name: stage_id
+        description: '{{ doc("stage_id") }}'
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_pipedrive__stages')
+                field: stage_id
+      - name: stage_sequence_number
+        description: '{{ doc("stage_sequence_number") }}'
+      - name: previous_stage_id
+        description: '{{ doc("previous_stage_id") }}'
+      - name: stage_move_type
+        description: '{{ doc("stage_move_type") }}'
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['pipeline_entry', 'next_stage', 'skipped_forward', 'repeated', 'moved_backward']
+      - name: stages_skipped
+        description: '{{ doc("stages_skipped") }}'
+      - name: is_first_entry_to_stage
+        description: '{{ doc("is_first_entry_to_stage") }}'
+      - name: is_current_stage
+        description: True for the deal's latest stage (for lost deals, the stage it was lost in).
+      - name: entered_at
+        description: '{{ doc("stage_entered_at") }}'
+      - name: exited_at
+        description: Time of the deal's next stage change; null for its last stage.
+
+  - name: int_deal_owner_history
+    description: Deal owner assignments as non-overlapping validity intervals [valid_from, valid_to).
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['deal_key', 'owner_sequence_number']
+    columns:
+      - name: deal_owner_change_id
+        description: Primary key; the deal_change_id of the owner assignment.
+        data_tests:
+          - unique
+          - not_null
+      - name: deal_key
+        description: '{{ doc("deal_key") }}'
+        data_tests:
+          - not_null
+      - name: deal_id
+        description: '{{ doc("deal_id") }}'
+      - name: user_id
+        description: Owner (Pipedrive user) of the deal during the interval.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_pipedrive__users')
+                field: user_id
+      - name: owner_sequence_number
+        description: 1 for the deal's first owner assignment, then incrementing.
+      - name: valid_from
+        description: Start of the assignment (time of the user_id change).
+      - name: valid_to
+        description: Start of the next assignment; null for the current owner.
+      - name: is_current_owner
+        description: True for the deal's latest owner assignment.
