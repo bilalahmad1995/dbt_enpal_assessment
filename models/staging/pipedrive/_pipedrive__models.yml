@@ -1,0 +1,162 @@
+version: 2
+
+models:
+  - name: stg_pipedrive__deal_changes
+    description: Deal change log, renamed. One row per deal field change (long / EAV format).
+    columns:
+      - name: deal_change_id
+        description: Surrogate key over (deal_id, changed_at, field_key).
+        data_tests:
+          - unique
+          - not_null
+      - name: deal_id
+        description: '{{ doc("deal_id") }}'
+        data_tests:
+          - not_null
+      - name: field_key
+        description: Changed field (add_time, user_id, stage_id, lost_reason).
+        data_tests:
+          - not_null
+      - name: new_value
+        description: New value as text; typed downstream per field_key.
+      - name: changed_at
+        description: Timestamp of the change.
+        data_tests:
+          - not_null
+
+  - name: stg_pipedrive__activities
+    description: Activities scheduled against deals, renamed and typed.
+    columns:
+      - name: activity_key
+        description: Surrogate primary key (activity_id is not unique in the source).
+        data_tests:
+          - unique
+          - not_null
+      - name: activity_id
+        description: Pipedrive activity id. Expected unique; 11 known reused ids, hence warn only.
+        data_tests:
+          - not_null
+          - unique:
+              config:
+                severity: warn
+      - name: deal_id
+        description: '{{ doc("deal_id") }}'
+        data_tests:
+          - not_null
+      - name: user_id
+        description: User the activity is assigned to.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('stg_pipedrive__users')
+                field: user_id
+      - name: activity_type_key
+        description: '{{ doc("activity_type_key") }}'
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_pipedrive__activity_types')
+                field: activity_type_key
+      - name: is_done
+        description: '{{ doc("is_done") }}'
+        data_tests:
+          - not_null
+      - name: due_at
+        description: Due timestamp. The only timestamp available for an activity (no completion time).
+        data_tests:
+          - not_null
+
+  - name: stg_pipedrive__activity_types
+    description: Activity type lookup.
+    columns:
+      - name: activity_type_id
+        description: Pipedrive activity type id.
+        data_tests:
+          - unique
+          - not_null
+      - name: activity_type_key
+        description: '{{ doc("activity_type_key") }}'
+        data_tests:
+          - unique
+          - not_null
+      - name: activity_type_name
+        description: Display name of the activity type (e.g. Sales Call 1).
+      - name: is_active
+        description: False for types deactivated in Pipedrive (historical activities still exist).
+
+  - name: stg_pipedrive__stages
+    description: Pipeline stage lookup. stage_id doubles as the funnel order.
+    columns:
+      - name: stage_id
+        description: '{{ doc("stage_id") }}'
+        data_tests:
+          - unique
+          - not_null
+      - name: stage_name
+        description: Stage name as configured in Pipedrive. KPI names come from the sales_funnel_steps seed instead.
+        data_tests:
+          - not_null
+
+  - name: stg_pipedrive__fields
+    description: Deal field metadata.
+    columns:
+      - name: field_id
+        description: Pipedrive field id.
+        data_tests:
+          - unique
+          - not_null
+      - name: field_key
+        description: Machine key of the deal field, as used in stg_pipedrive__deal_changes.field_key.
+        data_tests:
+          - unique
+          - not_null
+      - name: field_name
+        description: Display name of the field (e.g. Lost reason).
+      - name: has_value_options
+        description: True for enum fields (stage_id, lost_reason), whose options are in stg_pipedrive__field_options.
+
+  - name: stg_pipedrive__field_options
+    description: Enum options of deal fields, one row per (field_key, option_id). Decodes lost_reason ids.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['field_key', 'option_id']
+    columns:
+      - name: field_key
+        description: Enum field the option belongs to (stage_id or lost_reason).
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_pipedrive__fields')
+                field: field_key
+      - name: option_id
+        description: Option id, as stored in the change log's new_value for this field.
+        data_tests:
+          - not_null
+      - name: option_label
+        description: Option label, e.g. the lost reason text.
+        data_tests:
+          - not_null
+
+  - name: stg_pipedrive__users
+    description: Pipedrive users. user_email is personal data and is intentionally not propagated to marts.
+    columns:
+      - name: user_id
+        description: Pipedrive user id.
+        data_tests:
+          - unique
+          - not_null
+      - name: user_name
+        description: Display name of the user.
+        config:
+          meta:
+            contains_pii: true
+      - name: user_email
+        description: Email address of the user. Personal data; stays in staging.
+        config:
+          meta:
+            contains_pii: true
+      - name: modified_at
+        description: Last modification of the user record in Pipedrive.

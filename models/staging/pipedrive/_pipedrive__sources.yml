@@ -1,0 +1,154 @@
+version: 2
+
+sources:
+  - name: pipedrive
+    description: >
+      Raw Pipedrive CRM extract, loaded 1:1 from raw_data/*.csv into the public schema by the
+      docker-compose data_loader. No load timestamps exist, so source freshness cannot be checked.
+      Timestamps are naive and assumed to be UTC (Pipedrive API default).
+    database: postgres
+    schema: public
+    tables:
+      - name: deal_changes
+        description: >
+          Deal change log (Pipedrive "deal updates" / flow). One row per tracked field change, in
+          entity-attribute-value form. Only four fields are tracked: add_time (deal created),
+          user_id (owner), stage_id (pipeline stage) and lost_reason. The current state of a deal is
+          NOT stored anywhere; it must be derived from this log.
+        columns:
+          - name: deal_id
+            description: Pipedrive deal id. Not globally unique in this extract (5 ids are reused by two deals, see README).
+            data_tests:
+              - not_null
+          - name: change_time
+            description: Timestamp of the change.
+            data_tests:
+              - not_null
+          - name: changed_field_key
+            description: Key of the changed deal field, decoded by the fields table.
+            data_tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: ['add_time', 'user_id', 'stage_id', 'lost_reason']
+                  config:
+                    severity: warn
+              - relationships:
+                  arguments:
+                    to: source('pipedrive', 'fields')
+                    field: field_key
+          - name: new_value
+            description: New value as text. Ids for user_id / stage_id / lost_reason, ISO timestamp for add_time.
+            data_tests:
+              - not_null
+
+      - name: activity
+        description: >
+          Activities (calls, meetings) scheduled against deals. Only the due date is available,
+          not the completion timestamp.
+        columns:
+          - name: activity_id
+            description: Pipedrive activity id. Not unique in this extract (11 ids appear twice with unrelated content).
+            data_tests:
+              - not_null
+          - name: type
+            description: Activity type key, joins to activity_types.type.
+            data_tests:
+              - not_null
+              - relationships:
+                  arguments:
+                    to: source('pipedrive', 'activity_types')
+                    field: type
+          - name: assigned_to_user
+            description: User the activity is assigned to.
+            data_tests:
+              - relationships:
+                  arguments:
+                    to: source('pipedrive', 'users')
+                    field: id
+          - name: deal_id
+            description: >
+              Deal the activity belongs to. Only 8 of these ids also appear in deal_changes, about as
+              many as random 6-digit ids would share (README finding 3).
+            data_tests:
+              - not_null
+          - name: done
+            description: Whether the activity was marked as done.
+            data_tests:
+              - not_null
+          - name: due_to
+            description: Due date/time of the activity.
+            data_tests:
+              - not_null
+
+      - name: activity_types
+        description: Activity type lookup (account configuration).
+        columns:
+          - name: id
+            description: Activity type id.
+            data_tests:
+              - unique
+              - not_null
+          - name: type
+            description: Machine key referenced by activity.type.
+            data_tests:
+              - unique
+              - not_null
+          - name: name
+            description: Display name of the activity type (e.g. Sales Call 1).
+          - name: active
+            description: "'Yes' / 'No' flag; inactive types can still have historical activities."
+            data_tests:
+              - accepted_values:
+                  arguments:
+                    values: ['Yes', 'No']
+
+      - name: fields
+        description: Deal field metadata; decodes deal_changes.changed_field_key and the option ids of enum fields.
+        columns:
+          - name: id
+            description: Field id.
+            data_tests:
+              - unique
+              - not_null
+          - name: field_key
+            description: Machine key of the deal field, referenced by deal_changes.changed_field_key.
+            data_tests:
+              - unique
+              - not_null
+          - name: name
+            description: Display name of the field (e.g. Lost reason).
+          - name: field_value_options
+            description: JSON array of {id, label} for enum fields (stage_id, lost_reason); null otherwise.
+
+      - name: stages
+        description: Pipeline stage lookup (single pipeline, 9 stages, ordered by stage_id).
+        columns:
+          - name: stage_id
+            description: Stage id; also the stage order in the single pipeline.
+            data_tests:
+              - unique
+              - not_null
+          - name: stage_name
+            description: Stage name as configured in Pipedrive (e.g. Qualified lead).
+
+      - name: users
+        description: Pipedrive users (deal owners / activity assignees). Contains personal data (name, email).
+        columns:
+          - name: id
+            description: Pipedrive user id.
+            data_tests:
+              - unique
+              - not_null
+          - name: name
+            description: Display name of the user.
+            config:
+              meta:
+                contains_pii: true
+          - name: email
+            description: Email address of the user.
+            config:
+              meta:
+                contains_pii: true
+          - name: modified
+            description: Last modification of the user record in Pipedrive.
