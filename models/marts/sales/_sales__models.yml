@@ -1,0 +1,57 @@
+version: 2
+
+models:
+  - name: fct_sales_funnel_events
+    description: >
+      One row per deal and funnel step: when the deal first entered the step. Step definitions come
+      from the sales_funnel_steps seed. Stage steps are observed entries only: a deal that skipped
+      a stage did not enter it (use dim_deals.max_stage_id for a cumulative "reached" funnel).
+      Sales-call steps count completed activities only, timed by their due date. Sales-call deals
+      cannot be linked to the deal change log (README finding 3), so cohort conversion and time
+      between steps only work for the stage steps.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['deal_key', 'funnel_step']
+    columns:
+      - name: funnel_event_id
+        description: Surrogate key over (deal_key, funnel_step).
+        data_tests:
+          - unique
+          - not_null
+      - name: deal_key
+        description: >
+          Stage steps: the deal's deal_key (joins to dim_deals). Sales-call steps: the activity's
+          deal_id as text, which practically never exists in dim_deals.
+        data_tests:
+          - not_null
+      - name: deal_id
+        description: '{{ doc("deal_id") }}'
+        data_tests:
+          - not_null
+      - name: funnel_step
+        description: '{{ doc("funnel_step") }}'
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('sales_funnel_steps')
+                field: funnel_step
+      - name: kpi_name
+        description: '{{ doc("kpi_name") }}'
+        data_tests:
+          - not_null
+      - name: event_source
+        description: deal_stage or activity.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['deal_stage', 'activity']
+      - name: entered_at
+        description: When the deal entered the step.
+        data_tests:
+          - not_null
+      - name: entered_month
+        description: First day of the month of entered_at.
+        data_tests:
+          - not_null

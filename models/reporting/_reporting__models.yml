@@ -1,0 +1,49 @@
+version: 2
+
+models:
+  - name: rep_sales_funnel_monthly
+    description: >
+      Monthly sales funnel report: number of deals that entered each funnel step (KPI) in each
+      month, for every month between the first and last funnel event. One row per
+      (month, funnel_step); zero-filled. Built only on fct_sales_funnel_events and the
+      sales_funnel_steps seed. The column contract is enforced, so a change to the report
+      interface fails the build instead of silently breaking dashboards. Sales-call steps (2.1,
+      3.1) come from activities, whose extract ends on 2024-09-13: Sep 2024 is a partial month
+      and later months are 0 because no activity records exist.
+    config:
+      contract:
+        enforced: true
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['month', 'funnel_step']
+    columns:
+      - name: month
+        description: First day of the reporting month.
+        data_type: date
+        constraints:
+          - type: not_null
+      - name: kpi_name
+        description: '{{ doc("kpi_name") }}'
+        data_type: text
+        constraints:
+          - type: not_null
+      - name: funnel_step
+        description: '{{ doc("funnel_step") }}'
+        data_type: numeric
+        constraints:
+          - type: not_null
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('sales_funnel_steps')
+                field: funnel_step
+      - name: deals_count
+        description: Number of distinct deals that entered the funnel step for the first time in the month.
+        data_type: integer
+        constraints:
+          - type: not_null
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
