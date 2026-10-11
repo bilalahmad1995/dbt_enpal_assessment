@@ -38,12 +38,6 @@ success.
 `profiles.yml` lives in the project root and defaults to the docker credentials
 (override with `DBT_HOST`, `DBT_PORT`, `DBT_USER`, `DBT_PASSWORD`, `DBT_DATABASE`).
 
-> **Windows note.** With `core.autocrlf=true`, git checks `raw_data/load_data.sh` out with CRLF line
-> endings and the `data_loader` container fails (`$'\r': command not found`), leaving the tables empty.
-> The added `.gitattributes` forces LF for `*.sh`. If you cloned before this fix, re-checkout the file
-> (`rm raw_data/load_data.sh && git checkout -- raw_data/load_data.sh`) and recreate the stack:
-> `docker compose down -v && docker compose up -d`.
-
 ## 2. Architecture
 
 ```mermaid
