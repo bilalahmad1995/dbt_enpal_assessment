@@ -1,0 +1,13 @@
+# dbt artifacts
+target/
+dbt_packages/
+logs/
+.user.yml
+
+# Python environment
+.venv/
+__pycache__/
+
+# Editors
+.vscode/
+.idea/
