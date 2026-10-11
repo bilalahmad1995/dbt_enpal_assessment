@@ -214,9 +214,10 @@ PII: `users.email` is tagged `contains_pii` and stays in staging. Marts expose o
 
 ## 6. SQL efficiency
 
-- **Single scans, no self-joins.** The change log is pivoted with `FILTER`-ed aggregates in one `GROUP BY`
-  (`dim_deals`), and latest values come from `DISTINCT ON`. Timelines use window functions instead of
-  correlated subqueries.
+- **Pivots and windows instead of subqueries.** `dim_deals` pivots the change log with `FILTER`-ed
+  aggregates in one `GROUP BY` (all timestamp attributes in one pass, not one subquery each), and the latest
+  lost reason comes from `DISTINCT ON`. Timelines use window functions (`row_number`, `lag`, `lead`) instead
+  of correlated subqueries or self-joins to find a deal's previous or next change.
 - **Shared windows.** Window functions over the same partition and order share one named `WINDOW`
   (`deal_timeline` in `int_deal_stage_changes` and `int_deal_owner_history`), so they can be computed over
   a single sort. Only `is_first_entry_to_stage` needs a second window, partitioned by `(deal_key, stage_id)`.
