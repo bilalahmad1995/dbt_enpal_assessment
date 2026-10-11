@@ -1,0 +1,57 @@
+version: 2
+
+seeds:
+  - name: sales_funnel_steps
+    description: >
+      Business definition of the sales funnel: which Pipedrive event makes a deal enter which
+      funnel step. Pipeline stages map via pipedrive_stage_id, sales-call sub-steps via
+      pipedrive_activity_type. Changing the funnel (renaming, adding a step, remapping) is a data
+      change here, not a code change in the models.
+    config:
+      column_types:
+        funnel_step: numeric
+        kpi_name: text
+        source_type: text
+        pipedrive_stage_id: integer
+        pipedrive_activity_type: text
+    data_tests:
+      # each step maps to exactly one source event: a stage or an activity type
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "(pipedrive_stage_id is null) <> (pipedrive_activity_type is null)"
+    columns:
+      - name: funnel_step
+        description: '{{ doc("funnel_step") }}'
+        data_tests:
+          - unique
+          - not_null
+      - name: kpi_name
+        description: '{{ doc("kpi_name") }}'
+        data_tests:
+          - unique
+          - not_null
+      - name: source_type
+        description: deal_stage or activity.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['deal_stage', 'activity']
+      - name: pipedrive_stage_id
+        description: Pipeline stage whose first entry counts as this step (stage steps only, null otherwise).
+        data_tests:
+          - unique
+          - relationships:
+              arguments:
+                to: ref('stg_pipedrive__stages')
+                field: stage_id
+      - name: pipedrive_activity_type
+        description: >
+          Activity type key whose first completed activity counts as this step (sales-call steps only,
+          null otherwise).
+        data_tests:
+          - unique
+          - relationships:
+              arguments:
+                to: ref('stg_pipedrive__activity_types')
+                field: activity_type_key

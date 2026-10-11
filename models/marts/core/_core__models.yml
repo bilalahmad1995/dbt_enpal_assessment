@@ -1,0 +1,217 @@
+version: 2
+
+models:
+  - name: dim_deals
+    description: >
+      One row per deal (deal_key) with its derived current state: stage, owner, status, lost
+      reason and lifecycle timestamps. Pipedrive's extract only contains a change log, so this is
+      the single place where "current deal state" is defined.
+    columns:
+      - name: deal_key
+        description: '{{ doc("deal_key") }}'
+        data_tests:
+          - unique
+          - not_null
+      - name: deal_id
+        description: '{{ doc("deal_id") }}'
+        data_tests:
+          - not_null
+      - name: deal_lifecycle_number
+        description: '{{ doc("deal_lifecycle_number") }}'
+      - name: is_deal_id_reused
+        description: True if the Pipedrive deal_id is shared with another deal in this extract (data quality flag).
+      - name: deal_status
+        description: >
+          'lost' once a lost_reason was set, otherwise 'open'. A 'won' status cannot be derived:
+          the extract has no status field, and every deal in it ends with a lost_reason, including
+          deals that reached the post-sale stages 7-9. 'lost' therefore does not prove a deal was
+          never won.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['open', 'lost']
+      - name: current_stage_id
+        description: Stage the deal is currently in; for lost deals the stage it was lost in.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('stg_pipedrive__stages')
+                field: stage_id
+      - name: current_stage_name
+        description: Name of current_stage_id.
+      - name: max_stage_id
+        description: >
+          Furthest stage the deal ever reached. Because stages are ordered, "deal reached stage N"
+          is max_stage_id >= N, which supports a cumulative funnel even when stages were skipped.
+      - name: max_stage_name
+        description: Name of max_stage_id.
+      - name: current_owner_user_id
+        description: Latest assigned owner.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_users')
+                field: user_id
+      - name: lost_reason_id
+        description: Option id of the latest lost reason; decoded in lost_reason.
+      - name: lost_reason
+        description: Lost reason label decoded from the fields metadata.
+      - name: created_at
+        description: Deal creation time (add_time).
+        data_tests:
+          - not_null
+      - name: pipeline_entered_at
+        description: First stage change (entry into the pipeline, stage 1 in practice).
+      - name: current_stage_entered_at
+        description: >
+          When the deal entered its current stage. For a lost deal, lost_at - current_stage_entered_at
+          is the time from its last stage change to the loss.
+      - name: lost_at
+        description: When the (latest) lost_reason was set.
+      - name: last_changed_at
+        description: Latest change of any tracked field.
+      - name: stage_change_count
+        description: Number of stage changes, including the pipeline entry.
+      - name: stages_skipped_count
+        description: Total number of stages the deal jumped over.
+      - name: owner_assignment_count
+        description: Number of owner assignments (first assignment plus re-assignments).
+
+  - name: dim_users
+    description: Pipedrive users (owners / assignees). Personal data limited to the display name; email stays in staging.
+    columns:
+      - name: user_id
+        description: Pipedrive user id.
+        data_tests:
+          - unique
+          - not_null
+      - name: user_name
+        description: Display name of the user, for owner and assignee reporting.
+        config:
+          meta:
+            contains_pii: true
+      - name: modified_at
+        description: Last modification of the user record in Pipedrive.
+
+  - name: fct_deal_stage_history
+    description: >
+      One row per stage entry of a deal (SCD2-style: entered_at / exited_at), enriched with the
+      stage name and the deal owner at the time of entry. Includes repeated entries; filter on
+      is_first_entry_to_stage for "deals that entered a stage" KPIs.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['deal_key', 'stage_sequence_number']
+    columns:
+      - name: deal_stage_change_id
+        description: Primary key. Unique here also proves the owner as-of join does not fan out.
+        data_tests:
+          - unique
+          - not_null
+      - name: deal_key
+        description: '{{ doc("deal_key") }}'
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_deals')
+                field: deal_key
+      - name: deal_id
+        description: '{{ doc("deal_id") }}'
+      - name: stage_id
+        description: '{{ doc("stage_id") }}'
+        data_tests:
+          - not_null
+      - name: stage_name
+        description: Stage name from the Pipedrive stages lookup.
+        data_tests:
+          - not_null
+      - name: stage_sequence_number
+        description: '{{ doc("stage_sequence_number") }}'
+      - name: previous_stage_id
+        description: '{{ doc("previous_stage_id") }}'
+      - name: stage_move_type
+        description: '{{ doc("stage_move_type") }}'
+      - name: stages_skipped
+        description: '{{ doc("stages_skipped") }}'
+      - name: is_first_entry_to_stage
+        description: '{{ doc("is_first_entry_to_stage") }}'
+      - name: is_current_stage
+        description: >
+          True for the deal's last stage entry: the current stage of an open deal, or the stage a
+          lost deal was lost from.
+      - name: owner_user_id
+        description: Deal owner when the stage was entered; null if no owner was assigned yet.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_users')
+                field: user_id
+      - name: entered_at
+        description: '{{ doc("stage_entered_at") }}'
+        data_tests:
+          - not_null
+      - name: exited_at
+        description: Entry time of the deal's next stage; null for its last stage.
+      - name: days_in_stage
+        description: >
+          Days until the deal's next stage change (time between stage transitions). Null for the
+          deal's last stage, which for a lost deal is the stage it was lost from, so averages exclude
+          the time until loss. Use dim_deals.lost_at - current_stage_entered_at for that.
+
+  - name: fct_activities
+    description: >
+      One row per activity (call / meeting) with its type. Note: only 8 of ~4.6k activity deal_ids
+      exist in the deal change log, about as many as random 6-digit ids would share by chance
+      (README finding 3). Activities cannot be tied to deal stages in this extract.
+    columns:
+      - name: activity_key
+        description: Surrogate primary key.
+        data_tests:
+          - unique
+          - not_null
+      - name: activity_id
+        description: Pipedrive activity id (not unique, see is_activity_id_reused).
+      - name: deal_id
+        description: '{{ doc("deal_id") }}'
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_deals')
+                field: deal_id
+              config:
+                severity: warn
+      - name: deal_key
+        description: >
+          deal_key of the deal, when the deal_id is present in the change log and maps to a single
+          deal. An id match only, not a verified link (the 8 matches are consistent with chance):
+          do not use it to join activities to deal histories.
+      - name: has_deal_history
+        description: True if the deal_id exists in the deal change log (id match only, see deal_key).
+      - name: user_id
+        description: User the activity is assigned to.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_users')
+                field: user_id
+      - name: activity_type_key
+        description: '{{ doc("activity_type_key") }}'
+        data_tests:
+          - not_null
+      - name: activity_type_name
+        description: Display name of the activity type (e.g. Sales Call 1).
+        data_tests:
+          - not_null
+      - name: is_activity_type_active
+        description: >
+          False if the type is deactivated in Pipedrive (Follow Up Call). Its historical activities
+          are kept.
+      - name: is_done
+        description: '{{ doc("is_done") }}'
+      - name: due_at
+        description: Due timestamp; also the best available proxy for when a done activity happened.
+      - name: is_activity_id_reused
+        description: True if the activity_id is shared with another, unrelated activity (data quality flag).

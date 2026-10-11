@@ -1,0 +1,12 @@
+funnel_step,kpi_name,source_type,pipedrive_stage_id,pipedrive_activity_type
+1,Lead Generation,deal_stage,1,
+2,Qualified Lead,deal_stage,2,
+2.1,Sales Call 1,activity,,meeting
+3,Needs Assessment,deal_stage,3,
+3.1,Sales Call 2,activity,,sc_2
+4,Proposal/Quote Preparation,deal_stage,4,
+5,Negotiation,deal_stage,5,
+6,Closing,deal_stage,6,
+7,Implementation/Onboarding,deal_stage,7,
+8,Follow-up/Customer Success,deal_stage,8,
+9,Renewal/Expansion,deal_stage,9,
